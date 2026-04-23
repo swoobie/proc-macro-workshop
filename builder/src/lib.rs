@@ -21,18 +21,31 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let builder_struct_fields = field_idents
         .clone()
-        .zip(field_types)
+        .zip(field_types.clone())
         .map(|(ident, ty)| quote! { #ident: Option<#ty> });
 
     let name = &derive_input.ident;
     let builder_ident = format_ident!("{}Builder", name);
+
+    let builder_setters = field_idents
+        .clone()
+        .zip(field_types.clone())
+        .map(|(ident, ty)| {
+            quote! {
+                pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
+                }
+            }
+        });
+
     let expanded = quote! {
         pub struct #builder_ident {
             #(#builder_struct_fields),*
         }
 
         impl #builder_ident {
-            // Builder methods will go here in the next step
+            #(#builder_setters)*
         }
 
         impl #name {
