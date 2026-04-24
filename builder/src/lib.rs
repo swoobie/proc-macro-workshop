@@ -6,12 +6,15 @@ use syn::{parse_macro_input, Data, Fields};
 pub fn derive(input: TokenStream) -> TokenStream {
     let derive_input = parse_macro_input!(input as syn::DeriveInput);
 
-    let fields = match derive_input.data {
-        Data::Struct(data_struct) => match data_struct.fields {
-            Fields::Named(fields) => fields.named,
-            _ => panic!("Builder can only be derived for structs with named fields"),
-        },
-        _ => panic!("Builder can only be derived for structs"),
+    // fancier destructuring syntax:
+    let fields = if let Data::Struct(syn::DataStruct {
+        fields: Fields::Named(syn::FieldsNamed { ref named, .. }),
+        ..
+    }) = derive_input.data
+    {
+        named
+    } else {
+        panic!("Builder can only be derived for structs with named fields");
     };
 
     let name = &derive_input.ident;
@@ -49,7 +52,6 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }
         }
     };
-
     eprintln!("Expanded code:\n{}", expanded);
 
     TokenStream::from(expanded)
