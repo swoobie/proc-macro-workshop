@@ -6,81 +6,56 @@ use syn::{parse_macro_input, Data, Fields};
 pub fn derive(input: TokenStream) -> TokenStream {
     let derive_input = parse_macro_input!(input as syn::DeriveInput);
 
-    // fancier destructuring syntax:
-    let fields = if let Data::Struct(syn::DataStruct {
-        fields: Fields::Named(syn::FieldsNamed { ref named, .. }),
+    let (idents, types, name, builder_name) = if let syn::DeriveInput {
+        data:
+            Data::Struct(syn::DataStruct {
+                fields: Fields::Named(syn::FieldsNamed { ref named, .. }),
+                ..
+            }),
+        ident,
         ..
-    }) = derive_input.data
+    } = derive_input
     {
-        named
+        (
+            named
+                .iter()
+                .map(|f| f.ident.clone().unwrap())
+                .collect::<Vec<_>>(),
+            named.iter().map(|f| f.ty.clone()).collect::<Vec<_>>(),
+            ident.clone(),
+            format_ident!("{}Builder", ident.clone()),
+        )
     } else {
         panic!("Builder can only be derived for structs with named fields");
     };
 
-    let name = &derive_input.ident;
-    let builder_ident = format_ident!("{}Builder", name);
-
-    let builder_setters = fields.iter().map(map_builder_setters);
-    let builder_fields = fields.iter().map(map_builder_fields);
-    let field_idents = fields.iter().map(|f| f.ident.as_ref());
-    let validation_checks = fields.iter().map(map_field_validation);
-
-    let build_method = quote! {
-        pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
-            Ok(#name {
-               #(#validation_checks)*
-            })
-        }
-    };
-
     let expanded = quote! {
-        pub struct #builder_ident {
-            #(#builder_fields),*
+        pub struct #builder_name {
+            #(#idents: Option<#types>),*
         }
 
-        impl #builder_ident {
-            #(#builder_setters)*
+        impl #builder_name {
 
-            #build_method
+            #(pub fn #idents(&mut self, #idents: #types) -> &mut Self {
+                self.#idents = Some(#idents);
+                self
+            })*
+
+            pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+                Ok(#name {
+                    #(#idents: self.#idents.clone().ok_or(concat!("Field ", stringify!(#idents), " is missing"))?,)*
+                })
+            }
         }
 
         impl #name {
-            pub fn builder() -> #builder_ident {
-                #builder_ident {
-                    #(#field_idents: None),*
+            pub fn builder() -> #builder_name {
+                #builder_name {
+                    #(#idents: None),*
                 }
             }
         }
     };
-    eprintln!("Expanded code:\n{}", expanded);
 
-    TokenStream::from(expanded)
-}
-
-// -- Helper functions --
-
-fn map_builder_setters(field: &syn::Field) -> proc_macro2::TokenStream {
-    let ident = field.ident.as_ref().unwrap();
-    let ty = &field.ty;
-    quote! {
-        pub fn #ident(&mut self, #ident: #ty) -> &mut Self {
-            self.#ident = Some(#ident);
-            self
-        }
-    }
-}
-
-fn map_builder_fields(field: &syn::Field) -> proc_macro2::TokenStream {
-    let ident = field.ident.as_ref().unwrap();
-    let ty = &field.ty;
-    quote! {
-        #ident: Option<#ty>
-    }
-}
-
-fn map_field_validation(field: &syn::Field) -> proc_macro2::TokenStream {
-    let ident = field.ident.as_ref().unwrap();
-    quote! {
-        #ident: self.#ident.clone().ok_or(concat!("Field ", stringify!(#ident), " is missing"))?,
-    }
+    expanded.into()
 }
